@@ -1,2 +1,2 @@
 # loadosophia-uploader
-Command line tool to upload test results to Loadosophia
+Command line tool to upload JMeter test results to Loadosophia
