@@ -11,7 +11,7 @@
 
     <name>Loadosophia Uploader Tool</name>
 
-    <description>Command line tool to upload test results to Loadosophia</description>
+    <description>Command line tool to upload JMeter test results to Loadosophia</description>
 
     <licenses>
         <license>
@@ -36,7 +36,7 @@
 
     <properties>
         <java-version>1.6</java-version>
-        <jmeter-plugins-standard-version>1.2.1</jmeter-plugins-standard-version>
+        <jmeter-plugins-standard-version>1.2.0</jmeter-plugins-standard-version>
         <cmdrunner-version>1.0.2</cmdrunner-version>
         <jorphan-version>2.6</jorphan-version>
     </properties>
