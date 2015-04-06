@@ -1,5 +1,7 @@
 package kg.apc.cmdtools;
 
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.collections.Predicate;
 import org.apache.jorphan.logging.LoggingManager;
 import org.apache.log.Logger;
 import org.apache.log.Priority;
@@ -8,11 +10,9 @@ import org.loadosophia.jmeter.LoadosophiaAPIClient;
 import org.loadosophia.jmeter.LoadosophiaUploadResults;
 
 import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.Arrays;
-import java.util.LinkedList;
-import java.util.ListIterator;
+import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.*;
 
 /**
  * Created by Anton Rustamov (arustamov) on 4/1/2015.
@@ -26,6 +26,7 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
     private String tokenFile;
     private String uploadToken;
     private String dataFile;
+    private List<File> dataFiles = new ArrayList<File>();
     private String projectKey;
     private String colorFlag = LoadosophiaAPIClient.COLOR_NONE;
     private String testTitle = "";
@@ -81,7 +82,8 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
         }
 
         checkParams();
-        checkDataFileNotEmpty();
+        findDataFiles();
+        skipEmptyDataFiles();
         readUploadToken();
         initAPIClient();
         int result = doUpload();
@@ -89,16 +91,22 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
     }
 
     protected int doUpload() {
-        try {
-            log.info("Going to upload data file: " + dataFile + " to Loadosophia");
-            LoadosophiaUploadResults uploadResult = apiClient.sendFiles(new File(dataFile), new LinkedList<String>());
-            String redirectLink = uploadResult.getRedirectLink();
-            log.info("Data file: " + dataFile + " uploaded successfully. Go to results: " + redirectLink);
-            return 0;
-        } catch (IOException ex) {
-            log.error("Failed to upload data file: " + dataFile + " to Loadosophia", ex);
-            return 1;
+        int errors = 0;
+        log.info(String.format("Going to upload %d not empty data files", dataFiles.size()));
+        for (File dataFile : dataFiles) {
+            try {
+                log.info(String.format("Going to upload data file: %s", dataFile));
+                LoadosophiaUploadResults uploadResult = apiClient.sendFiles(dataFile, new LinkedList<String>());
+                String redirectLink = uploadResult.getRedirectLink();
+                log.info(String.format("Successfully uploaded data file: %s", dataFile));
+                log.info(String.format("Go to results: %s", redirectLink));
+            } catch (IOException ex) {
+                log.error("Failed to upload data file: " + dataFile + " to Loadosophia", ex);
+                errors++;
+            }
         }
+        log.info(String.format("Successfully uploaded %d data files", dataFiles.size() - errors));
+        return errors;
     }
 
     protected void showHelp(PrintStream os) {
@@ -113,11 +121,7 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
                 + "]");
     }
 
-    protected void initAPIClient() {
-        apiClient = new LoadosophiaAPIClient(new LoggingStatusNotifier(), ADDRESS, uploadToken, projectKey, colorFlag, testTitle);
-    }
-
-    private void checkParams() {
+    protected void checkParams() {
         if (tokenFile == null) {
             throw new IllegalArgumentException("Missing token file");
         }
@@ -127,26 +131,67 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
         if (dataFile == null) {
             throw new IllegalArgumentException("Missing path to data file(s) to upload");
         }
+        if (!(new File(dataFile).isAbsolute())) {
+            throw new IllegalArgumentException("Path to data file(s) to upload should be absolute");
+        }
         if (projectKey == null) {
             throw new IllegalArgumentException("Missing project key");
         }
     }
 
-    private void checkDataFileNotEmpty() {
+    protected void initAPIClient() {
+        apiClient = new LoadosophiaAPIClient(new LoggingStatusNotifier(), ADDRESS, uploadToken, projectKey, colorFlag, testTitle);
+    }
+
+    private void findDataFiles() {
+        final PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + dataFile);
         try {
-            LineNumberReader reader = new LineNumberReader(new FileReader(dataFile));
-            while (reader.readLine() != null) {
-                int lineNumber = reader.getLineNumber();
-                if (lineNumber > 1) return;
+            Files.walkFileTree(getDataFileRoot(), new SimpleFileVisitor<Path>() {
+                @Override
+                public FileVisitResult visitFile(Path path, BasicFileAttributes attrs) throws IOException {
+                    if (matcher.matches(path)) {
+                        log.info(String.format("Found data file: %s", path));
+                        dataFiles.add(path.toFile());
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException ex) {
+            log.error("I/O error in visitor", ex);
+        }
+        log.info(String.format("Total count of data files found: %d", dataFiles.size()));
+    }
+
+    private Path getDataFileRoot() {
+        Iterable<Path> rootDirectories = FileSystems.getDefault().getRootDirectories();
+        for (Path rootDirectory : rootDirectories) {
+            if (dataFile.startsWith(rootDirectory.toString())) return rootDirectory;
+        }
+        return null;
+    }
+
+    private void skipEmptyDataFiles() {
+        CollectionUtils.filter(dataFiles, new Predicate() {
+            @Override
+            public boolean evaluate(Object dataFile) {
+                try {
+                    boolean isEmpty = true;
+                    LineNumberReader reader = new LineNumberReader(new FileReader((File) dataFile));
+                    while (reader.readLine() != null) {
+                        int lineNumber = reader.getLineNumber();
+                        if (lineNumber > 1) isEmpty = false;
+                    }
+                    return !isEmpty;
+                } catch (IOException ex) {
+                    throw new RuntimeException(String.format("Failed to read specified data file: %s", dataFile), ex);
+                }
             }
-            throw new RuntimeException("Empty data set read from file");
-        }
-        catch (FileNotFoundException ex) {
-            throw new RuntimeException("Cannot find specified data file: " + dataFile, ex);
-        }
-        catch (IOException ex) {
-            throw new RuntimeException("Failed to read specified data file: " + dataFile, ex);
-        }
+        });
     }
 
     private void readUploadToken() {
@@ -154,7 +199,7 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
             byte[] encoded = Files.readAllBytes(Paths.get(tokenFile));
             uploadToken = new String(encoded);
         } catch (IOException ex) {
-            throw new RuntimeException("Failed to read specified token file: " + tokenFile, ex);
+            throw new RuntimeException(String.format("Failed to read specified token file: %s", tokenFile), ex);
         }
     }
 }
