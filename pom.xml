@@ -6,7 +6,7 @@
 
     <groupId>kg.apc</groupId>
     <artifactId>loadosophia-uploader</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
     <packaging>jar</packaging>
 
     <name>Loadosophia Uploader Tool</name>

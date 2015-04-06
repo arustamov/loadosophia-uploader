@@ -7,9 +7,7 @@ import org.loadosophia.jmeter.LoggingStatusNotifier;
 import org.loadosophia.jmeter.LoadosophiaAPIClient;
 import org.loadosophia.jmeter.LoadosophiaUploadResults;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.PrintStream;
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Arrays;
@@ -31,6 +29,7 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
     private String projectKey;
     private String colorFlag = LoadosophiaAPIClient.COLOR_NONE;
     private String testTitle = "";
+    private LoadosophiaAPIClient apiClient;
 
     protected int processParams(ListIterator args) throws UnsupportedOperationException, IllegalArgumentException {
         LoggingManager.setPriority(Priority.INFO);
@@ -44,9 +43,9 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
                 }
                 tokenFile = (String) args.next();
             }
-            else if (nextArg.equalsIgnoreCase("--jtl-file")) {
+            else if (nextArg.equalsIgnoreCase("--data-file")) {
                 if (!args.hasNext()) {
-                    throw new IllegalArgumentException("Missing JTL file");
+                    throw new IllegalArgumentException("Missing data file");
                 }
                 dataFile = (String) args.next();
             }
@@ -82,16 +81,22 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
         }
 
         checkParams();
+        checkDataFileNotEmpty();
+        readUploadToken();
+        initAPIClient();
+        int result = doUpload();
+        return result;
+    }
 
+    protected int doUpload() {
         try {
-            readUploadToken();
-            LoadosophiaAPIClient apiClient = getAPIClient();
+            log.info("Going to upload data file: " + dataFile + " to Loadosophia");
             LoadosophiaUploadResults uploadResult = apiClient.sendFiles(new File(dataFile), new LinkedList<String>());
             String redirectLink = uploadResult.getRedirectLink();
-            log.info("Uploaded successfully, go to results: " + redirectLink);
+            log.info("Data file: " + dataFile + " uploaded successfully. Go to results: " + redirectLink);
             return 0;
         } catch (IOException ex) {
-            log.error("Failed to upload results to loadosophia", ex);
+            log.error("Failed to upload data file: " + dataFile + " to Loadosophia", ex);
             return 1;
         }
     }
@@ -99,7 +104,7 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
     protected void showHelp(PrintStream os) {
         os.println("Options for tool 'Loadosophia Uploader': --generate-png <filename> "
                 + "--token-file <token file> "
-                + "--jtl-file <data file> "
+                + "--data-file <data file> "
                 + "--project-key <project name> "
                 + "[ "
                 + "--color-flag <\"none\"/\"red\"/\"green\"/\"blue\"/\"gray\"/\"orange\"/\"violet\"/\"cyan\"/\"black\"> "
@@ -108,8 +113,8 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
                 + "]");
     }
 
-    protected LoadosophiaAPIClient getAPIClient() {
-        return new LoadosophiaAPIClient(new LoggingStatusNotifier(), ADDRESS, uploadToken, projectKey, colorFlag, testTitle);
+    protected void initAPIClient() {
+        apiClient = new LoadosophiaAPIClient(new LoggingStatusNotifier(), ADDRESS, uploadToken, projectKey, colorFlag, testTitle);
     }
 
     private void checkParams() {
@@ -120,18 +125,36 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
             throw new IllegalArgumentException("Cannot find specified token file: " + tokenFile);
         }
         if (dataFile == null) {
-            throw new IllegalArgumentException("Missing JTL file");
-        }
-        if (!(new File(dataFile).exists())) {
-            throw new IllegalArgumentException("Cannot find specified JTL file: " + dataFile);
+            throw new IllegalArgumentException("Missing path to data file(s) to upload");
         }
         if (projectKey == null) {
             throw new IllegalArgumentException("Missing project key");
         }
     }
 
-    private void readUploadToken() throws IOException {
-        byte[] encoded = Files.readAllBytes(Paths.get(tokenFile));
-        uploadToken = new String(encoded);
+    private void checkDataFileNotEmpty() {
+        try {
+            LineNumberReader reader = new LineNumberReader(new FileReader(dataFile));
+            while (reader.readLine() != null) {
+                int lineNumber = reader.getLineNumber();
+                if (lineNumber > 1) return;
+            }
+            throw new RuntimeException("Empty data set read from file");
+        }
+        catch (FileNotFoundException ex) {
+            throw new RuntimeException("Cannot find specified data file: " + dataFile, ex);
+        }
+        catch (IOException ex) {
+            throw new RuntimeException("Failed to read specified data file: " + dataFile, ex);
+        }
+    }
+
+    private void readUploadToken() {
+        try {
+            byte[] encoded = Files.readAllBytes(Paths.get(tokenFile));
+            uploadToken = new String(encoded);
+        } catch (IOException ex) {
+            throw new RuntimeException("Failed to read specified token file: " + tokenFile, ex);
+        }
     }
 }
