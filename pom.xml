@@ -30,8 +30,8 @@
 
     <scm>
         <url>https://github.com/arustamov/loadosophia-uploader</url>
-        <connection>https://github.com/arustamov/loadosophia-uploader.git</connection>
-        <developerConnection>git@github.com:arustamov/loadosophia-uploader.git</developerConnection>
+        <connection>scm:git:https://github.com/arustamov/loadosophia-uploader.git</connection>
+        <developerConnection>scm:git:git@github.com:arustamov/loadosophia-uploader.git</developerConnection>
     </scm>
 
     <properties>
