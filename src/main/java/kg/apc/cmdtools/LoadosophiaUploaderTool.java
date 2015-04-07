@@ -131,9 +131,6 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
         if (dataFile == null) {
             throw new IllegalArgumentException("Missing path to data file(s) to upload");
         }
-        if (!(new File(dataFile).isAbsolute())) {
-            throw new IllegalArgumentException("Path to data file(s) to upload should be absolute");
-        }
         if (projectKey == null) {
             throw new IllegalArgumentException("Missing project key");
         }
@@ -146,7 +143,7 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
     private void findDataFiles() {
         final PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + dataFile);
         try {
-            Files.walkFileTree(getDataFileRoot(), new SimpleFileVisitor<Path>() {
+            Files.walkFileTree(getStartPath(), new SimpleFileVisitor<Path>() {
                 @Override
                 public FileVisitResult visitFile(Path path, BasicFileAttributes attrs) throws IOException {
                     if (matcher.matches(path)) {
@@ -167,12 +164,16 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
         log.info(String.format("Total count of data files found: %d", dataFiles.size()));
     }
 
-    private Path getDataFileRoot() {
-        Iterable<Path> rootDirectories = FileSystems.getDefault().getRootDirectories();
-        for (Path rootDirectory : rootDirectories) {
-            if (dataFile.startsWith(rootDirectory.toString())) return rootDirectory;
+    private Path getStartPath() {
+        Path startPath = null;
+        if (new File(dataFile).isAbsolute()) {
+            Iterable<Path> rootDirectories = FileSystems.getDefault().getRootDirectories();
+            for (Path rootDirectory : rootDirectories) {
+                if (dataFile.startsWith(rootDirectory.toString())) startPath = rootDirectory;
+            }
         }
-        return null;
+        else startPath = Paths.get("").toAbsolutePath();
+        return startPath;
     }
 
     private void skipEmptyDataFiles() {
