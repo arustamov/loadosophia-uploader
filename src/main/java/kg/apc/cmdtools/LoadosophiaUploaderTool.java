@@ -2,6 +2,7 @@ package kg.apc.cmdtools;
 
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.Predicate;
+import org.apache.commons.collections.Transformer;
 import org.apache.jorphan.logging.LoggingManager;
 import org.apache.log.Logger;
 import org.apache.log.Priority;
@@ -25,12 +26,25 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
 
     private String tokenFile;
     private String uploadToken;
-    private String dataFile;
-    private List<File> dataFiles = new ArrayList<File>();
+    private String jtlFilePath;
+    private boolean singleJtlFile;
+    private String perfMonFilePath;
     private String projectKey;
     private String colorFlag = LoadosophiaAPIClient.COLOR_NONE;
     private String testTitle = "";
     private LoadosophiaAPIClient apiClient;
+
+    protected void showHelp(PrintStream os) {
+        os.println("Options for tool 'Loadosophia Uploader': --generate-png <filename> "
+                + "--token-file <token file> "
+                + "--data-file <data file> "
+                + "--project-key <project name> "
+                + "[ "
+                + "--color-flag <\"none\"/\"red\"/\"green\"/\"blue\"/\"gray\"/\"orange\"/\"violet\"/\"cyan\"/\"black\"> "
+                + "--test-title <test title> "
+                + "--log-level <<debug|info|warn|error>> "
+                + "]");
+    }
 
     protected int processParams(ListIterator args) throws UnsupportedOperationException, IllegalArgumentException {
         LoggingManager.setPriority(Priority.INFO);
@@ -44,11 +58,25 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
                 }
                 tokenFile = (String) args.next();
             }
-            else if (nextArg.equalsIgnoreCase("--data-file")) {
+            else if (nextArg.equalsIgnoreCase("--jtl-file")) {
                 if (!args.hasNext()) {
-                    throw new IllegalArgumentException("Missing data file");
+                    throw new IllegalArgumentException("Missing jtl file");
                 }
-                dataFile = (String) args.next();
+                jtlFilePath = (String) args.next();
+                singleJtlFile = true;
+            }
+            else if (nextArg.equalsIgnoreCase("--jtl-files")) {
+                if (!args.hasNext()) {
+                    throw new IllegalArgumentException("Missing jtl files");
+                }
+                jtlFilePath = (String) args.next();
+                singleJtlFile = false;
+            }
+            else if (nextArg.equalsIgnoreCase("--perf-mon-file")) {
+                if (!args.hasNext()) {
+                    throw new IllegalArgumentException("Missing perf mon file");
+                }
+                perfMonFilePath = (String) args.next();
             }
             else if (nextArg.equalsIgnoreCase("--project-key")) {
                 if (!args.hasNext()) {
@@ -82,43 +110,67 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
         }
 
         checkParams();
-        findDataFiles();
-        skipEmptyDataFiles();
+        LinkedList<File> jtlFiles = findDataFiles(jtlFilePath);
+        removeEmptyDataFiles(jtlFiles);
+
+        if(jtlFiles.isEmpty()) {
+            throw new RuntimeException("No jtl data files found");
+        }
+
         readUploadToken();
         initAPIClient();
-        int result = doUpload();
-        return result;
+
+        if (singleJtlFile) {
+            File jtlFile = jtlFiles.getFirst();
+            LinkedList<File> perfMonDataFiles = new LinkedList<File>();
+            if (perfMonFilePath != null) {
+                perfMonDataFiles = findDataFiles(perfMonFilePath);
+                removeEmptyDataFiles(perfMonDataFiles);
+            }
+            return doUpload(jtlFile, perfMonDataFiles);
+        }
+        else {
+            return doUpload(jtlFiles);
+        }
     }
 
-    protected int doUpload() {
+    protected int doUpload(LinkedList<File> dataFiles) {
         int errors = 0;
         log.info(String.format("Going to upload %d not empty data files", dataFiles.size()));
         for (File dataFile : dataFiles) {
-            try {
-                log.info(String.format("Going to upload data file: %s", dataFile));
-                LoadosophiaUploadResults uploadResult = apiClient.sendFiles(dataFile, new LinkedList<String>());
-                String redirectLink = uploadResult.getRedirectLink();
-                log.info(String.format("Successfully uploaded data file: %s", dataFile));
-                log.info(String.format("Go to results: %s", redirectLink));
-            } catch (IOException ex) {
-                log.error("Failed to upload data file: " + dataFile + " to Loadosophia", ex);
-                errors++;
-            }
+            int status = doUpload(dataFile);
+            errors += status;
         }
         log.info(String.format("Successfully uploaded %d data files", dataFiles.size() - errors));
         return errors;
     }
 
-    protected void showHelp(PrintStream os) {
-        os.println("Options for tool 'Loadosophia Uploader': --generate-png <filename> "
-                + "--token-file <token file> "
-                + "--data-file <data file> "
-                + "--project-key <project name> "
-                + "[ "
-                + "--color-flag <\"none\"/\"red\"/\"green\"/\"blue\"/\"gray\"/\"orange\"/\"violet\"/\"cyan\"/\"black\"> "
-                + "--test-title <test title> "
-                + "--log-level <<debug|info|warn|error>> "
-                + "]");
+    protected int doUpload(File dataFile) {
+        return doUpload(dataFile, new LinkedList<File>());
+    }
+
+    protected int doUpload(File dataFile, LinkedList<File> perfMonDataFiles) {
+        LinkedList<String> perfMonDataFilesPath = getPerfMonDataFilesPaths(perfMonDataFiles);
+        try {
+            log.info(String.format("Going to upload data file: %s", dataFile));
+            LoadosophiaUploadResults uploadResult = apiClient.sendFiles(dataFile, perfMonDataFilesPath);
+            String redirectLink = uploadResult.getRedirectLink();
+            log.info(String.format("Successfully uploaded data file: %s", dataFile));
+            log.info(String.format("Go to results: %s", redirectLink));
+            return 0;
+        } catch (IOException ex) {
+            log.error("Failed to upload data file: " + dataFile + " to Loadosophia", ex);
+            return 1;
+        }
+
+    }
+
+    private LinkedList<String> getPerfMonDataFilesPaths(LinkedList<File> perfMonDataFiles) {
+        LinkedList<String> perfMonDataFilesPaths = new LinkedList<String>();
+        for (File perfMonDataFile : perfMonDataFiles) {
+            perfMonDataFilesPaths.add(perfMonDataFile.getPath());
+        }
+        return perfMonDataFilesPaths;
     }
 
     protected void checkParams() {
@@ -128,7 +180,7 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
         if (!(new File(tokenFile).exists())) {
             throw new IllegalArgumentException("Cannot find specified token file: " + tokenFile);
         }
-        if (dataFile == null) {
+        if (jtlFilePath == null) {
             throw new IllegalArgumentException("Missing path to data file(s) to upload");
         }
         if (projectKey == null) {
@@ -140,8 +192,9 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
         apiClient = new LoadosophiaAPIClient(new LoggingStatusNotifier(), ADDRESS, uploadToken, projectKey, colorFlag, testTitle);
     }
 
-    private void findDataFiles() {
-        final PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + dataFile);
+    private LinkedList<File> findDataFiles(String filePath) {
+        final LinkedList<File> dataFiles = new LinkedList<File>();
+        final PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + filePath);
         try {
             Files.walkFileTree(getStartPath(), new SimpleFileVisitor<Path>() {
                 @Override
@@ -162,21 +215,22 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
             log.error("I/O error in visitor", ex);
         }
         log.info(String.format("Total count of data files found: %d", dataFiles.size()));
+        return dataFiles;
     }
 
     private Path getStartPath() {
         Path startPath = null;
-        if (new File(dataFile).isAbsolute()) {
+        if (new File(jtlFilePath).isAbsolute()) {
             Iterable<Path> rootDirectories = FileSystems.getDefault().getRootDirectories();
             for (Path rootDirectory : rootDirectories) {
-                if (dataFile.startsWith(rootDirectory.toString())) startPath = rootDirectory;
+                if (jtlFilePath.startsWith(rootDirectory.toString())) startPath = rootDirectory;
             }
         }
         else startPath = Paths.get("").toAbsolutePath();
         return startPath;
     }
 
-    private void skipEmptyDataFiles() {
+    private void removeEmptyDataFiles(LinkedList<File> dataFiles) {
         CollectionUtils.filter(dataFiles, new Predicate() {
             @Override
             public boolean evaluate(Object dataFile) {
@@ -185,7 +239,10 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
                     LineNumberReader reader = new LineNumberReader(new FileReader((File) dataFile));
                     while (reader.readLine() != null) {
                         int lineNumber = reader.getLineNumber();
-                        if (lineNumber > 1) isEmpty = false;
+                        if (lineNumber > 1)  {
+                            isEmpty = false;
+                            break;
+                        }
                     }
                     return !isEmpty;
                 } catch (IOException ex) {
