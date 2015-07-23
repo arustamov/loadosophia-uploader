@@ -196,7 +196,7 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
         final LinkedList<File> dataFiles = new LinkedList<File>();
         final PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + filePath);
         try {
-            Files.walkFileTree(getStartPath(), new SimpleFileVisitor<Path>() {
+            Files.walkFileTree(getStartPath(filePath, true), new SimpleFileVisitor<Path>() {
                 @Override
                 public FileVisitResult visitFile(Path path, BasicFileAttributes attrs) throws IOException {
                     if (matcher.matches(path)) {
@@ -218,15 +218,22 @@ public class LoadosophiaUploaderTool extends AbstractCMDTool {
         return dataFiles;
     }
 
-    private Path getStartPath() {
+    private Path getStartPath(String path, boolean parent) {
         Path startPath = null;
-        if (new File(jtlFilePath).isAbsolute()) {
-            Iterable<Path> rootDirectories = FileSystems.getDefault().getRootDirectories();
-            for (Path rootDirectory : rootDirectories) {
-                if (jtlFilePath.startsWith(rootDirectory.toString())) startPath = rootDirectory;
+        try {
+            Path inputPath = Paths.get(path);
+            if (inputPath.isAbsolute()) {
+                startPath = parent? inputPath.getParent() : inputPath;
+            } else {
+                throw new RuntimeException(String.format("%s data file path is not absolute", path));
             }
         }
-        else startPath = Paths.get("").toAbsolutePath();
+        catch (InvalidPathException ex) {
+            int globIndex = ex.getIndex();
+            String newPath = path.substring(0, globIndex);
+            startPath = getStartPath(newPath, false);
+        }
+
         return startPath;
     }
 
